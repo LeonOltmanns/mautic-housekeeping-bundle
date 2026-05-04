@@ -70,3 +70,6 @@ done
 Leuchtfeuer Digital Marketing GmbH
 
 mautic@Leuchtfeuer.com
+
+## License
+This plugin is licensed under the GPL v3 License.
