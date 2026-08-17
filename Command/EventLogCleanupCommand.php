@@ -42,7 +42,7 @@ class EventLogCleanupCommand extends Command
                     new InputOption('email-stats-tokens', 't', InputOption::VALUE_NONE, 'Set only tokens fields in Email Stats Records to NULL. Important: This option can not be combined with any "-c", "-l" or "-m" flag in one command. And: If the option flag "-t" is not set, the NULL setting of tokens will not be done with the basis command, so if you just run mautic:leuchtfeuer:housekeeping without a flag)'),
                     new InputOption('cmp-id', 'i', InputOption::VALUE_OPTIONAL, 'Delete only campaign_lead_eventLog for a specific CampaignID. Implies --campaign-lead.', 'none'),
                     new InputOption('exclude-emails', null, InputOption::VALUE_REQUIRED, 'Comma-separated list of email IDs to exclude from deletion (e.g., 1,44,61). Works with --email-stats and --email-stats-tokens.', null),
-                    new InputOption('optimize-tables', 'o', InputOption::VALUE_NONE, 'Optimize all database tables after cleanup.'),
+                    new InputOption('optimize-tables', 'o', InputOption::VALUE_NONE, 'Optimize all database tables. If no cleanup flag is set, only the optimization runs and no data is deleted.'),
                 ]
             )
             ->setHelp(
@@ -58,6 +58,9 @@ class EventLogCleanupCommand extends Command
                 <info>php %command.full_name% --days-old=365 --dry-run</info>
                 
                 You can also optionally ensure that the OPTIMIZE TABLES command will run after deleting the records:
+                <info>php %command.full_name% --optimize-tables</info>
+
+                If you run --optimize-tables on its own, with no other cleanup flag, no data is deleted. Only the table optimization runs:
                 <info>php %command.full_name% --optimize-tables</info>
 
                 You can also optionally specify for which campaign the entries should be purged from campaign_lead_event_log:
@@ -90,6 +93,7 @@ class EventLogCleanupCommand extends Command
         $dryRun                               = $input->getOption('dry-run');
         $campaignId                           = 'none' === $input->getOption('cmp-id') ? null : (int) $input->getOption('cmp-id');
         $excludeEmails                        = $this->parseExcludeEmailIds($input, $output);
+        $optimizeTables                       = $input->getOption('optimize-tables');
 
         $operations                           = [
             EventLogCleanup::CAMPAIGN_LEAD_EVENTS => $input->getOption('campaign-lead') || null !== $campaignId,
@@ -99,35 +103,41 @@ class EventLogCleanupCommand extends Command
             EventLogCleanup::PAGE_HITS            => $input->getOption('page-hits'),
         ];
 
-        if (0 === array_sum($operations)) {
+        $hasCleanupOperations = array_sum($operations) > 0;
+        if ($optimizeTables && !$hasCleanupOperations) {
+            // Only --optimize-tables was given. Skip every delete/update operation.
+            $operations = array_combine(array_keys($operations), array_fill(0, count($operations), false));
+        } elseif (0 === array_sum($operations)) {
+            // No flag at all was given. Fall back to the default full cleanup.
             $operations                                      = array_combine(array_keys($operations), array_fill(0, count($operations), true));
             $operations[EventLogCleanup::EMAIL_STATS_TOKENS] = false;
         }
 
         if ((true === $operations[EventLogCleanup::EMAIL_STATS_TOKENS]) && (((true === $operations[EventLogCleanup::EMAIL_STATS]) || (true === $operations[EventLogCleanup::CAMPAIGN_LEAD_EVENTS])) || (true === $operations[EventLogCleanup::LEAD_EVENTS]))) {
-            $output->writeln('<error>The combination of “-t” flag with either “-m” flag or “-c” flag or “-l” flag is not supported/possible. You can only combine the "-t" flag with "-d" flag and/or "-r" flag.</error>');
+            $output->writeln('<error>The combination of "-t" flag with either "-m" flag or "-c" flag or "-l" flag is not supported/possible. You can only combine the "-t" flag with "-d" flag and/or "-r" flag.</error>');
 
             return 1;
         }
 
-        try {
-            $message = $this->eventLogCleanup->deleteEventLogEntries(
-                $daysOld,
-                $campaignId,
-                $dryRun,
-                $operations,
-                $output,
-                $excludeEmails
-            );
-        } catch (\Throwable $e) {
-            $output->writeln(sprintf('<error>Deletion of Log Rows failed because of database error: %s</error>', $e->getMessage()));
+        if (array_sum($operations) > 0) {
+            try {
+                $message = $this->eventLogCleanup->deleteEventLogEntries(
+                    $daysOld,
+                    $campaignId,
+                    $dryRun,
+                    $operations,
+                    $output,
+                    $excludeEmails
+                );
+            } catch (\Throwable $e) {
+                $output->writeln(sprintf('<error>Deletion of Log Rows failed because of database error: %s</error>', $e->getMessage()));
 
-            return 1;
+                return 1;
+            }
+
+            $output->writeln('<info>'.$message.'<info>');
         }
 
-        $output->writeln('<info>'.$message.'<info>');
-
-        $optimizeTables = $input->getOption('optimize-tables');
         if ($optimizeTables && !$dryRun) {
             try {
                 $message = $this->eventLogCleanup->optimizeTables($output);
