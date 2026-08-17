@@ -56,9 +56,6 @@ class EventLogCleanupCommand extends Command
 
                 You can also optionally specify a dry run without deleting any records:
                 <info>php %command.full_name% --days-old=365 --dry-run</info>
-                
-                You can also optionally ensure that the OPTIMIZE TABLES command will run after deleting the records:
-                <info>php %command.full_name% --optimize-tables</info>
 
                 If you run --optimize-tables on its own, with no other cleanup flag, no data is deleted. Only the table optimization runs:
                 <info>php %command.full_name% --optimize-tables</info>
